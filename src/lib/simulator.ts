@@ -23,11 +23,7 @@ const CUSTOMERS: Customer[] = [
   { name: "Pedro Sanchez", phone: "987654323" },
 ];
 
-const TENANTS: TenantId[] = [
-  "sucursal_lima_centro",
-  "sucursal_huacho",
-  "sucursal_miraflores",
-];
+const TENANTS: TenantId[] = ["sucursal_trujillo"];
 
 export function generateOrder(
   overrides?: Partial<RappiOrderRequest>,
