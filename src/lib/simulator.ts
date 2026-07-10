@@ -1,10 +1,11 @@
 import type {
   RappiOrderRequest,
-  RappiStatusUpdate,
   OrderItem,
   Customer,
   TenantId,
 } from "../types.js";
+
+// --- Menu / data fixtures ---
 
 const MENU: OrderItem[] = [
   { name: "Whopper", quantity: 1, price: 18.9 },
@@ -48,44 +49,92 @@ export function generateOrder(
   };
 }
 
-// --- Status log (incoming updates from AWS) ---
+// --- Order tracking store ---
 
-const STATUS_LOG: RappiStatusUpdate[] = [];
-
-export function logStatusUpdate(update: RappiStatusUpdate): void {
-  STATUS_LOG.push(update);
-  console.log(
-    `[Rappi] Order ${update.order_id} — ${update.status} (${update.step ?? "—"}) at ${update.timestamp}`,
-  );
-}
-
-export function getStatusLog(): RappiStatusUpdate[] {
-  return STATUS_LOG;
-}
-
-// --- Order tracker (orders we sent to AWS) ---
-
-interface TrackedOrder {
+export interface TrackedOrder {
   order_id: string;
   tenant_id: string;
+  status: string;
+  history: StatusEntry[];
   tracked_at: string;
 }
 
-const TRACKED_ORDERS = new Map<string, TrackedOrder>();
+export const orderStore = new Map<string, TrackedOrder>();
 
-export function trackOrder(orderId: string, tenantId: string): void {
-  TRACKED_ORDERS.set(orderId, {
-    order_id: orderId,
-    tenant_id: tenantId,
+export function trackOrder(awsBody: Record<string, unknown>): TrackedOrder {
+  const entry: TrackedOrder = {
+    order_id: awsBody.order_id as string,
+    tenant_id: awsBody.tenant_id as string,
+    status: (awsBody.status as string) ?? "PENDIENTE_COCINA",
+    history: [],
     tracked_at: new Date().toISOString(),
-  });
-  console.log(`[Rappi] Tracking order ${orderId} (tenant: ${tenantId})`);
+  };
+  orderStore.set(entry.order_id, entry);
+  console.log(`[Rappi] Tracking order ${entry.order_id} (tenant: ${entry.tenant_id})`);
+  return entry;
 }
 
-export function getTrackedOrder(orderId: string): TrackedOrder | undefined {
-  return TRACKED_ORDERS.get(orderId);
+// --- AWS status polling ---
+
+const ORDER_STATUSES = [
+  "PENDIENTE_COCINA",
+  "PENDIENTE_EMPAQUE",
+  "PENDIENTE_REPARTO",
+  "COMPLETADO",
+  "CANCELADO",
+] as const;
+
+export async function fetchOrderStatus(
+  orderId: string,
+  tenantId: string,
+  awsApiUrl: string,
+): Promise<{ found: boolean; status?: string; order?: Record<string, unknown> }> {
+  for (const status of ORDER_STATUSES) {
+    try {
+      const res = await fetch(
+        `${awsApiUrl}/orders?tenant_id=${encodeURIComponent(tenantId)}&status=${encodeURIComponent(status)}`,
+        { signal: AbortSignal.timeout(5_000) },
+      );
+      if (!res.ok) continue;
+
+      const data = await res.json() as { orders?: Record<string, unknown>[] } | Record<string, unknown>[];
+      const orders: Record<string, unknown>[] = Array.isArray(data)
+        ? data
+        : ((data as { orders?: Record<string, unknown>[] }).orders ?? []);
+
+      const match = orders.find((o) => o.order_id === orderId);
+      if (match) {
+        return { found: true, status: match.status as string, order: match };
+      }
+    } catch {
+      // probe failed for this status — try next
+    }
+  }
+  return { found: false };
 }
 
-export function getAllTrackedOrders(): TrackedOrder[] {
-  return Array.from(TRACKED_ORDERS.values());
+// --- Status update log (incoming webhook events from AWS) ---
+
+export interface StatusEntry {
+  order_id: string;
+  tenant_id?: string;
+  status: string;
+  step: string | null;
+  timestamp: string;
+}
+
+const STATUS_LOG: StatusEntry[] = [];
+
+export function logStatusUpdate(update: StatusEntry): StatusEntry {
+  STATUS_LOG.push(update);
+  const tracked = orderStore.get(update.order_id);
+  if (tracked) {
+    tracked.status = update.status;
+    tracked.history.push(update);
+  }
+  return update;
+}
+
+export function getStatusLog(): StatusEntry[] {
+  return STATUS_LOG;
 }
