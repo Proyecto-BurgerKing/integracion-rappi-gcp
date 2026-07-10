@@ -9,6 +9,7 @@ import {
 
 const AWS_API_URL = process.env.AWS_API_URL ?? "";
 const PORT = Number(process.env.PORT) || 3000;
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET ?? "";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data, null, 2), {
@@ -61,6 +62,13 @@ async function handleSendOrder(req: Request): Promise<Response> {
 
 async function handleReceiveStatus(req: Request): Promise<Response> {
   try {
+    if (WEBHOOK_SECRET) {
+      const incoming = req.headers.get("x-webhook-secret") ?? "";
+      if (incoming !== WEBHOOK_SECRET) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+    }
+
     const body = await req.json();
     const { order_id, tenant_id, status, step, timestamp } = body;
 
