@@ -48,6 +48,8 @@ export function generateOrder(
   };
 }
 
+// --- Status log (incoming updates from AWS) ---
+
 const STATUS_LOG: RappiStatusUpdate[] = [];
 
 export function logStatusUpdate(update: RappiStatusUpdate): void {
@@ -59,4 +61,31 @@ export function logStatusUpdate(update: RappiStatusUpdate): void {
 
 export function getStatusLog(): RappiStatusUpdate[] {
   return STATUS_LOG;
+}
+
+// --- Order tracker (orders we sent to AWS) ---
+
+interface TrackedOrder {
+  order_id: string;
+  tenant_id: string;
+  tracked_at: string;
+}
+
+const TRACKED_ORDERS = new Map<string, TrackedOrder>();
+
+export function trackOrder(orderId: string, tenantId: string): void {
+  TRACKED_ORDERS.set(orderId, {
+    order_id: orderId,
+    tenant_id: tenantId,
+    tracked_at: new Date().toISOString(),
+  });
+  console.log(`[Rappi] Tracking order ${orderId} (tenant: ${tenantId})`);
+}
+
+export function getTrackedOrder(orderId: string): TrackedOrder | undefined {
+  return TRACKED_ORDERS.get(orderId);
+}
+
+export function getAllTrackedOrders(): TrackedOrder[] {
+  return Array.from(TRACKED_ORDERS.values());
 }
